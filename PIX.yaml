@@ -1,0 +1,348 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: PIX
+  description: No ciclo básico de uma transferência entre um pagador e um recebedor, são utilizadas basicamente duas mensagens:PACS.008 e PACS.002, com possibilidade de uso de mensagens ADMI.002 para comunicação de erros não terminativos. Por sua vez, na situação de devolução de valores, ou seja, quando o usuário recebedor identifica que a transferência foi realizada de forma indevida e deseja devolver o valor ao pagado, são utilizadas as mensagens PACS.004 e PACS.002. Da mesma forma descrita no ciclo básico, a mensagem ADMI.002 é usada em erros não terminativos
+  contact:
+    email: desenvolvimento@gokeitecnologia.com
+paths: 
+  /V1/PIX/DICT:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Liquidação pix via DICT, inserindo a chave pix do recebedor.
+      tags:
+      - PAC.008
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_dict'
+      responses:
+        202:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_202'
+        400:
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+        
+  /V1/PIX/MANU:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Liquidação pix via MANU,inserindo os dados do recebedor manualmente.
+      tags:
+      - PAC.008
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_manu'
+      responses:
+        202:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_202'
+        400:
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+        
+components:
+  schemas:
+    body_response_202:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 202
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          example: Operação realizada com sucesso.
+              
+
+    body_response_400_bad_request:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 400
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Bad request.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: A entrada contém campos inválidos
+
+    body_response_503:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 503
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Service Unavailable.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: O serviço está em manutenção programada
+              
+    request_body_dict:
+      type: object
+      required:
+      - pagador
+      - recebedor
+      - chavePix
+      - mensagemPix
+      properties:
+        pagador:
+          type: object
+          required:
+          - valor
+          - nomePagador
+          - cpfCnpjPagador
+          - contaTransacionalPagador
+          - agenciaPagador
+          properties:
+            valor:
+              type: number
+              minimum: 0
+              maximum: 18
+              description: Valor que será enviado pelo pagador  
+            nomePagador:
+              type: string
+              minimum: 1
+              maximum: 140
+              description: Nome do pagador que está enviando o PIX
+            cpfCnpjPagador:
+              type: integer
+              minimum: 0
+              maximum: 14
+              example: 12822222215
+              description: CPF ou CNPJ do pagador que está enviando o PIX
+            contaTransacionalPagador:
+              type: integer
+              minimum: 1
+              maximum: 20
+              example: 1111108
+              description: Número da conta do pagador que está enviando o PIX
+            agenciaPagador:
+              type: integer
+              minimum: 1
+              maximum: 4
+              example: 0001
+              description: Número da Agência do pagador que está enviando o PIX
+              
+        recebedor:
+          type: object
+          required:
+          - ispbParticipanteRecebedor
+          - cpfCnpjPagador
+          - contaTransacionalRecebedor
+          - agenciaRecebedor
+          properties:
+            ispbParticipanteRecebedor:
+              type: integer
+              minimum: 8
+              maximum: 8 
+              example: 22222222
+              description: Identificador SPB do Participante Recebedor que está recebendo o PIX do pagador
+            cpfCnpjPagador:
+              type: integer
+              minimum: 0
+              maximum: 14
+              example: 45454545455
+              description: CPF ou CNPJ do pagador que está enviando PIX ao recebedor
+            contaTransacionalRecebedor:
+              type: integer
+              minimum: 1
+              maximum: 20
+              example: 23683707994215
+              description: Número da conta transacional do Recebedor que está recebendo o PIX do pagador
+            agenciaRecebedor:
+              type: integer
+              minimum: 1
+              maximum: 4
+              example: 5770
+              description: Número da Agência do recebedor que está recebendo o PIX do pagador 
+        chavePix:
+          type: string
+          minimum: 0
+          maximum: 77
+          example: bc@bc.com.br
+          description: Chave PIX
+        mensagemPix:
+          type: string
+          minimum: 0
+          maximum: 140
+          example: Campo livre.
+          description: Mensagem do motivo do envio do PIX ao recebedor
+    request_body_manu:
+      type: object
+      required:
+      - pagador
+      - recebedor
+      - chavePix
+      - mensagemPix
+      properties:
+        pagador:
+          type: object
+          required:
+          - valor
+          - nomePagador
+          - cpfCnpjPagador
+          - contaTransacionalPagador
+          - agenciaPagador
+          properties:
+            valor:
+              type: number
+              minimum: 0
+              maximum: 18
+              description: Valor que está sendo enviado por PIX do pagador ao recebedor
+            nomePagador:
+              type: string
+              minimum: 1
+              maximum: 140
+              description: Nome completo do pagador que está enviando o PIX, pode ser nome da PF ou PJ
+            cpfCnpjPagador:
+              type: integer
+              minimum: 0
+              maximum: 14
+              example: 12822222215
+              description: CPF ou CNPJ do pagador que está enviando PIX ao recebedor 
+            contaTransacionalPagador:
+              type: integer
+              minimum: 1
+              maximum: 20
+              example: 1111108
+              description: Número da conta transacional do pagador que está enviando o PIX ao recebedor.
+            agenciaPagador:
+              type: integer
+              minimum: 1
+              maximum: 4
+              example: 0001
+              description: Número da Agência do pagador  que está enviando o PIX ao recebedor 
+        recebedor:
+          type: object
+          required:
+          - ispbParticipanteRecebedor
+          - cpfCnpjPagador
+          - contaTransacionalRecebedor
+          - agenciaRecebedor
+          properties:
+            ispbParticipanteRecebedor:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 22222222
+              description: Identificador SPB do Participante Recebedor que está recebendo o PIX do pagador 
+            cpfCnpjPagador:
+              type: integer
+              minimum: 0
+              maximum: 14
+              example: 45454545455
+              description: CPF ou CNPJ do pagador que está enviando PIX ao recebedor
+            contaTransacionalRecebedor:
+              type: integer
+              minimum: 1
+              maximum: 20
+              example: 23683707994215
+              description: Número da conta transacional do Recebedor que está recebendo  o PIX do pagador
+            agenciaRecebedor:
+              type: integer
+              minimum: 1
+              maximum: 4
+              example: 5770
+              description: Número da Agência do recebedor que está recebendo o PIX do pagador
+        chavePix:
+          type: string
+          minimum: 0
+          maximum: 77
+          example: bc@bc.com.br
+          description: Chave PIX
+        mensagemPix:
+          type: string
+          minimum: 0
+          maximum: 140
+          example: Campo livre.
+          description: Mensagem que o pagador relata opcionalmente o motivo do envio do PIX ao recebedor

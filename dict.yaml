@@ -1,0 +1,4754 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: DICT
+  description: |-
+    O Diretório de Identificadores de Contas Transacionais - DICT - é o serviço do arranjo Pix que permite
+    buscar detalhes de contas transacionais com chaves de endereçamento mais convenientes para quem faz
+    um pagamento. Entre os tipos de chave atualmente disponíveis estão CPF, CNPJ, telefone, e-mail e EVP.
+    As informações retornadas pelo DICT permitem ao pagador confirmar a identidade do recebedor, proporcionando 
+    uma experiência mais fácil e segura. Permitem também ao PSP do pagador criar a mensagem de instrução de 
+    pagamento a ser enviada para o sistema de liquidação com os detalhes de conta do recebedor.
+
+    Para informações adicionais, consulte a [página do Pix](https://www.bcb.gov.br/estabilidadefinanceira/pagamentosinstantaneos).
+
+    # Segurança
+    ## Autenticação 
+    Utiliza o Bearer Authentication, o Bearer authentication (também chamada de autenticação por token) é um esquema de autenticação HTTP que envolve tokens de segurança chamados tokens do portador. O nome "Bearer authentication " pode ser entendido como "dar acesso ao portador deste token". O token do portador é uma string criptografada, geralmente gerada pelo servidor em resposta a uma solicitação de login. O cliente deve enviar este token no cabeçalho de autorização ao fazer solicitações para recursos protegidos
+
+  contact:
+    email: desenvolvimento@gokeitecnologia.com
+tags:
+  - name: Chave
+    x-displayName: Chave
+    description: |-
+
+      O diretório de identificadores de contas transacionais é um conjunto de vínculos.
+      Um vínculo é uma associação entre uma chave de endereçamento, uma conta transacional e seu dono.
+      O dono pode ser uma pessoa física ou uma pessoa jurídica. A chave de endereçamento é usada para identificar unicamente um vínculo.
+
+      Exemplo de vínculo:
+
+      |  Chave          | Conta                                 | Dono                              |
+      |-----------------|---------------------------------------|-----------------------------------|
+      | +5510998765432  | Banco Fictício/Ag.7263-4/Cc.748627-1  | José João da Silva                |
+
+      Uma chave transacional é uma sequência de caracteres que identifica um vínculo de forma única no diretório de identificadores.
+      A existência de uma determinada chave no diretório implica diretamente na existência de um vínculo.
+
+      Os tipos de chave suportadas atualmente são as seguintes:
+
+      |  Tipo         | Exp. regular                                                                                               | Exemplo                              | Comentário                                                                |
+      |---------------|------------------------------------------------------------------------------------------------------------|--------------------------------------|---------------------------------------------------------------------------|
+      | CPF           |  ^\[0-9\]{11}$                                                                                             | 12345678901                          |                                                                           |
+      | CNPJ          |  ^\[0-9\]{14}$                                                                                             | 12345678901234                       |                                                                           |
+      | PHONE         |  ^\\+\[1-9\]\[0-9\]\d{1,14}$                                                                               | +5510998765432                       |                                                                           |
+      | EMAIL         |  [e-mails válidos W3C HTML5](https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address)       | pix@bcb.gov.br                       | E-mail deve possuir no máximo 77 caracteres e deve ser em minúsculo       |
+      | EVP           |  [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}                                              | 123e4567-e89b-12d3-a456-426655440000 | Endereço Virtual de Pagamento é um tipo de chave é gerado pelo DICT       |
+
+
+      Novos tipos de chave poderão vir a ser adicionados no futuro. Logo, é importante que a implementação de clientes
+      seja flexível, permitindo a adição de novos tipos de chave.
+
+      Apesar da existência de uma chave estar sempre relacionada a um vínculo, é possível a realização de consultas de existência
+      de chaves.
+  - name: Reivindicação
+    x-displayName: Reivindicação
+    description: |-
+      Conforme as chaves mudem de dono ou os usuários finais criem contas transacionais em outros PSPs, 
+      os seguintes cenários precisarão ser tratados:
+
+      1. Houve troca de posse de uma chave (telefone ou email) e o novo dono deseja 
+      criar um vínculo para uma conta sua mas o dono anterior já possui vínculo registrado 
+      no DICT com essa chave.
+      2. Um usuário deseja mudar a vinculação de uma chave sua para outra conta, que 
+      está domiciliada em um participante diferente do atual.
+
+      Para o cenário 1, deve ser criada uma _reivindicação de posse_. Já para o cenário 2,
+      uma _portabilidade_. Em ambos cenários existirá a figura do PSP que irá ceder a chave (PSP Doador),
+      e o PSP que irá receber a chave (PSP Reivindicador). No cenário de _reivindicação de posse_, o PSP 
+      doador e o reivindicador podem ser o mesmo.
+
+      Nessa especificação, _reivindicação_ sem qualificador é usado como termo mais genérico para se referir 
+      tanto à reivindicação de posse quanto à (reivindicação de) portabilidade.
+
+      Os processos de reivindicação são sempre iniciados pelo PSP reivindicador.
+      Uma reivindicação tem as seguintes situações:
+        - `OPEN` - Aberta pelo reivindicador, mas ainda não recebida pelo doador.
+        - `WAITING_RESOLUTION` - Já foi recebida pelo doador e está aguardando a resolução. Os critérios confirmação
+        ou cancelamento da reivindicação seguem normas específicas a depender do tipo (posse ou portabilidade).
+        - `CONFIRMED` - O doador confirmou a reivindicação. Isso implica a remoção da chave do DICT e da base interna 
+        do PSP doador. Está aguardando o reivindicador encerrar o processo.
+        - `CANCELLED` - O doador ou reivindicador cancelou a reivindicação, mantendo o vínculo inalterado (conforme estava antes da 
+        reivindicação) tanto no DICT quanto na base interna do PSP.
+        - `COMPLETED` - Tanto o DICT quanto o reivindicador atualizaram suas bases com o novo vínculo.
+
+      **Diagrama de estados**
+
+      ```
+      ( OPEN )------->( WAITING_RESOLUTION )------->( CONFIRMED )------->( COMPLETED )
+                                |                        /                            
+                                |                       /                             
+                                |                      /                              
+                                |                     /--Apenas para                  
+                                v                    /   reivindicação                
+                          ( CANCELLED )<------------v    de posse                      
+      ```
+
+      **Importante!** 
+      Os participantes deverão monitorar as reivindicações fazendo _polling_ períodico no _endpoint_
+      de [listar reivindicações](#operation/listClaims). A periodicidade adequada dependerá 
+      das definições de nível de serviço. Consulte o [Manual de Tempos do Pix](https://www.bcb.gov.br/content/estabilidadefinanceira/pix/Regulamento_Pix/IX.ManualdeTemposdoPix-versao1.1.pdf).
+  - name: Reconciliação
+    x-displayName: Reconciliação
+    description: |-
+      A reconciliação permite que o participante identifique inconsistências nos vínculos da sua base de dados interna 
+      e o DICT. É possível fazer a verificação de forma agregada, sobre todo o conjunto de vínculos, e a verificação de um 
+      vínculo individual.
+
+      Para permitir que a reconciliação seja feita de forma eficiente e segura, toda operação realizada em cima de um vínculo
+      gera um identificador de conteúdo, ou CID (_content identifier_). O CID é um número de 256 bits que identifica de forma 
+      única o vínculo e todos os seus atributos essenciais (ver seção sobre cálculo do CID). Modifições dos dados essenciais 
+      do vínculo implicam na modificação do CID associado a ele.
+
+      A verificação agregada dos vínculos é feita com base no _verificador de sincronismo_ (VSync). O participante pode 
+      aferir a igualdade do conjunto de vínculos em seu domínio gerando o VSync (ver seção sobre cálculo do VSync) da sua base 
+      e criando uma [verificação de sincronismo](#operation/createSyncVerification). A igualdade dos VSyncs do DICT e do 
+      PSP implica, com altíssima probabilidade, que o conjunto de CIDs é igual. Caso os VSyncs sejam diferentes, o conjunto 
+      de CIDs é necessariamente diferente, o que significa que há divergências no conjunto de dados de vínculos naquele momento.
+
+      Ao identificar divergências, PSP poderá [consultar pelo CID](#operation/getEntryByCid), [alterar](#operation/updateEntry),
+      [remover](#operation/deleteEntry) ou [criar](#operation/createEntry) vínculos colocando no campo `Reason` das requisições
+      o valor `RECONCILIATION`.
+
+      As operações feitas no conjunto de vínculos sob domínio do PSP podem ser acompanhadas de forma contínua no 
+      [log de eventos de CIDs](#operation/listCidSetEvents).
+
+      Para obter uma lista completa dos CIDs no DICT relativos a um tipo de chave, um PSP poderá solicitar a 
+      [criação de um arquivo de CIDs](#operation/createCidSetFile).
+
+      ## Cálculo de CID
+
+      O CID é calculado da seguinte forma:
+
+      ```
+      entryAttributes = keyType "&" key "&" ownerTaxIdNumber "&" ownerName "&" ownerTradeName "&" participant "&" branch "&" accountNumber "&" accountType
+      cidBytes = hmacSha256(requestIdBytes, entryAttributes)
+      cid = lowercase-hexadecimal(cidBytes)
+      ```
+      Observações:
+
+      - `entryAttributes` é uma string construída pela junção dos atributos essenciais do vínculo, separados por `&`. 
+        Todos atributos são strings codificadas em UTF-8. Atributos nulos são codificados com string em branco, "".
+      - `hmacSha256` é a função HMAC baseada na função de hash SHA-256.
+      - `requestIdBytes` são 16 bytes aleatórios, gerados para identificar a requisição que cria o vínculo, usado como chave na função hmacSha256.
+      - `cid` é a representação hexadecimal, em lowercase, do resultado da função hmacSha256.
+
+      Exemplo:
+
+      ```
+      entryAttributes = 'PHONE&+5511987654321&11122233300&João Silva&&12345678&00001&0007654321&CACC'
+      requestIdBytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+      cid = '28c06eb41c4dc9c3ae114831efcac7446c8747777fca8b145ecd31ff8480ae88'
+      ```
+
+
+      ## Cálculo do VSync
+
+
+      O VSync é resultado da aplicação de bitwise-XOR ('OU' exclusivo bit-a-bit) sobre todos os CIDs de um determinado 
+      tipo de chave.
+
+      Exemplo: 
+
+      ```
+      cids = ['28c06eb41c4dc9c3ae114831efcac7446c8747777fca8b145ecd31ff8480ae88', 
+              '4d4abb9168114e349672b934d16ed201a919cb49e28b7f66a240e62c92ee007f', 
+              'fce514f84f37934bc8aa0f861e4f7392273d71b9d18e8209d21e4192a7842058']
+
+      vsync = xor(xor(cids[0], cids[1]), cids[2])  = '996fc1dd3b6b14bcf0c9fe8320eb66d7e2a3fd874ccf767b2e939641b1ea8eaf'      
+      ````
+
+      Observações:
+      - VSync para um conjunto vazio de CIDs é definido como '0000000000000000000000000000000000000000000000000000000000000000'.
+      - Há três CIDs no exemplo acima, representados em hexadecimal. A operação bitwise-XOR é feita com os CIDs em formato binário.
+      - bitwise-XOR é comutativo, não importa a ordem da sua aplicação.
+      - Para calcular o novo VSync resultante da adição de um CID ao conjunto, basta calcular o XOR desse CID com o VSync atual.
+        O novo VSync resultante da remoção de um CID é calculado da mesma forma.
+  - name: Relatos de infração
+    x-displayName: Relatos de Infração
+    description: |-
+      Relatos de infração servem para reportar transações sob suspeita de fraude (FRAUD). 
+      Podem ser feitas tanto pelo participante debitado quanto pelo creditado na transação.
+
+      Depois de criado, o relato deve ser reconhecido pela outra parte da transação (acknowledge) e,
+      após análise, fechado (close) concordando (AGREED) ou discordando (DISAGREED) da infração.
+
+      O criador do relato pode cancelá-lo a qualquer momento, mesmo depois de fechado.
+
+      Relatos de infração são criados a partir do identificador da transação realizada no SPI
+      (EndToEndId). O prazo máximo para relatar infração em uma transação está no regulamento do DICT.
+
+      Cada participante deve realizar _polling_ periódico na lista de relatos para verificar se
+      existem novos relatos em que é parte. O recebimento do relato não implica em concordância.
+      Os níveis de serviço exigidos para as operações com relatos de infração estão definidos no
+      [Manual de Tempos do Pix](https://www.bcb.gov.br/content/estabilidadefinanceira/pix/Regulamento_Pix/IX.ManualdeTemposdoPix-versao1.1.pdf).
+
+      Os relatos por motivo de fraude são contabilizados e retornados ao
+      [consultar vínculo](#operation/getEntry). Se for cancelado, o relato deixa de ser contabilizado
+      em REPORTED_FRAUDS durante a consulta de vínculos.
+paths:
+  /V1/entradas:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >-
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM          
+    post:
+      summary: Criar Chave
+      tags:
+        - Chave
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/request_body_diretorio_post'
+      responses:
+        '201':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201_diretorio'
+                
+        '400':
+          description: Invalid Entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_entry_invalid'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '503':
+          description: Service Unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/entradas/{chave}:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+      - name: chave
+        in: path
+        description: Chave do pix
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >-
+          +5511999345678          
+    get:
+      summary: Consultar Vínculo
+      tags:
+        - Chave
+      responses:
+        '200':
+          description: Ok.
+          headers:
+            PI-RateLimit-ClientRemaining:
+              description: Número de requisições disponíveis para que limite associado ao `PI-PayerId` seja atingido.
+              schema:
+                type: integer
+              example: 100
+            PI-RateLimit-ClientReset:
+              description: Segundos até que limite associado ao `PI-PayerId` seja renovado.
+              schema:
+                type: integer
+              example: 30
+            PI-RateLimit-ParticipantRemaining:
+              description: Número de requisições disponíveis para que limite associado ao `PI-RequestingParticipant` seja atingido.
+              schema:
+                type: integer
+              example: 100
+            PI-RateLimit-ParticipantReset:
+              description: Segundos até que limite associado ao `PI-RequestingParticipant` seja renovado.
+              schema:
+                type: integer
+              example: 30
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_diretorio'
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        '429':
+          description: Rate-Limited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_429'
+
+    put:
+      summary: Atualizar Vínculo
+      tags:
+        - Chave
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/request_body_diretorio_put'
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_diretorio_put'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/entradas/{chave}/delete:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+      - name: chave
+        in: path
+        description: Chave do pix
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >-
+          +5511999345678       
+    post:
+      summary: Deletar vinculo
+      tags:
+        - Chave
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/request_body_diretorio_delete'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_diretorio_delete'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_entry_invalid'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_entry_invalid'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/chave/checagem:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Verificar existência de chaves.
+      tags:
+        - Chave
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_chave'
+      responses:
+        200:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_chave'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        404:
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+
+  /V1/claims/:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Criar Reivindicação
+      tags:
+        - Reivindicação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_criar_reivindicacao'
+      responses:
+        '201':
+          description: Criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+    get:
+      summary: Listar Reivindicações
+      parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+      operationId: listClaims
+      tags:
+        - Reivindicação
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_get_listclaim_200'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        '403':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+  
+  /V1/claims/{ClaimId}:
+    parameters:
+      - name: PI-RequestingParticipant
+        in: header
+        description: Identificador SPB do participante (direto ou indireto) que faz a requisição.
+        required: true
+        schema:
+          type: string
+          pattern: '^[0-9]{8}$'
+          example: '12345678'
+          items:
+            type: string
+            format: string
+        style: simple
+    get:
+      summary: Consultar Reivindicação
+      operationId: getClaim
+      parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - schema:
+            type: string
+          in: path
+          name: ClaimId
+          description: "string <uuid>"
+          required: true
+      description: Obtém detalhes de uma reivindicação.
+      tags:
+        - Reivindicação
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_get_claimid_200'
+
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+    
+  /V1/claims/{ClaimId}/reconhecer/:            
+    post:
+      summary: Receber Reivindicação
+      parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - schema:
+            type: string
+          in: path
+          name: ClaimId
+          description: "string <uuid>"
+          required: true
+      tags:
+        - Reivindicação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_reivindicacao_reconhecer'
+      responses:
+        '200':
+          description: OK
+          headers:
+            Signature:
+              description: object
+              schema:
+                type: object
+              example: 100
+            ClaimId:
+              description: 'string <uuid>'
+              schema:
+                type: string
+              example: 100
+            Participant:
+              description: 'string^[0-9]{8}$ Identificador SPB do doador'
+              schema:
+                type: string
+              example: 100
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_post_receber_200'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+                
+  /V1/claims/{ClaimId}/confirmar/:
+    parameters:
+      - schema:
+          type: string
+          format: uuid
+        name: ClaimId
+        in: path
+        required: true
+  
+    post:
+      summary: Confirmar Reivindicação
+      parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - schema:
+            type: string
+          in: path
+          name: ClaimId
+          description: "string <uuid>"
+          required: true
+      tags:
+        - Reivindicação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_reivindicacao_confirmar'
+      responses:
+        '200':
+          description: OK
+          headers:
+            Signature:
+              description: object
+              schema:
+                type: object
+              example: 100
+            ClaimId:
+              description: 'string <uuid>'
+              schema:
+                type: string
+              example: 100
+            Participant:
+              description: 'string^[0-9]{8}$ Identificador SPB do doador'
+              schema:
+                type: string
+              example: 100
+            Reason:
+              description: 'Enum: "USER_REQUESTED" "ACCOUNT_CLOSURE" "FRAUD" "DEFAULT_OPERATION" Razão da operação'
+              schema:
+                type: string
+              example: 100
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_post_confirmar_200'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+                
+  /V1/claims/{ClaimId}/cancelar/:            
+    post:
+      summary: Cancelar Reivindicação
+      parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - schema:
+            type: string
+          in: path
+          name: ClaimId
+          description: "string <uuid>"
+          required: true
+      tags:
+        - Reivindicação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_reivindicacao_confirmar'
+      responses:
+        '200':
+          description: OK
+          headers:
+            Signature:
+              description: object
+              schema:
+                type: object
+              example: 100
+            ClaimId:
+              description: 'string <uuid>'
+              schema:
+                type: string
+              example: 100
+            Participant:
+              description: 'string^[0-9]{8}$ Identificador SPB do doador'
+              schema:
+                type: string
+              example: 100
+            Reason:
+              description: 'Enum: "USER_REQUESTED" "ACCOUNT_CLOSURE" "FRAUD" "DEFAULT_OPERATION" Razão da operação'
+              schema:
+                type: string
+              example: 100
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_post_cancelar_200'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+                
+  /V1/claims/{ClaimId}/completo/:            
+    post:
+      summary: Concluir Reivindicação
+      parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - schema:
+            type: string
+          in: path
+          name: ClaimId
+          description: "string <uuid>"
+          required: true
+      tags:
+        - Reivindicação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_reivindicacao_completo'
+      responses:
+        '200':
+          description: OK
+          headers:
+            Signature:
+              description: object
+              schema:
+                type: object
+              example: 100
+            ClaimId:
+              description: 'string <uuid>'
+              schema:
+                type: string
+              example: 100
+            Participant:
+              description: 'string^[0-9]{8}$ Identificador SPB do doador'
+              schema:
+                type: string
+              example: 100
+            RequestId:
+              description: 'string <uuid> (RequestId) Chave de idempotência da requisição. UUID versão 4.'
+              schema:
+                type: string
+              example: 100
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_post_concluir_200'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        '503':
+          description: Service Unavailable 503
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/reconciliacao/sincronizacao:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Verificar Sincronismo.
+      tags:
+        - Reconciliação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_reconciliacao_sync'
+      responses:
+        201:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201_reconciliacao_sync'
+        400:
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/reconciliacao/cids/arquivos:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Criar arquivo de CIDs.
+      tags:
+        - Reconciliação
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_reconciliacao_cid'
+      responses:
+        201:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201_reconciliacao_cid'
+        400:
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/reconciliacao/cids/arquivos/{id}:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >-
+          1234      
+    get:
+      summary: Consultar Arquivos de CIDs
+      tags:
+        - Reconciliação
+      responses:
+        '200':
+          description: Ok.
+          headers:
+            PI-RequestingParticipant:
+              description: Identificador SPB do participante (direto ou indireto) que faz a requisição.
+              schema:
+                type: string
+              example: 12345678
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_reconciliacao_ca_id'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+  /V1/reconciliacao/cids/eventos:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    get:
+      summary: Listar eventos de CIDs
+      tags:
+        - Reconciliação
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201_reconciliacao_listar_eventos_cid'
+        '400':
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+                
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+  /V1/reconciliacao/cids/entradas/{cid}:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+      - name: cid
+        in: path
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >-
+          1234      
+    get:
+      summary: Consultar Vínculo por CID
+      tags:
+        - Reconciliação
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201_reconciliacao_viculos_cid'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+  /V1/relatos_infracao:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+    post:
+      summary: Criar Relato de Infração
+      tags:
+        - Relatos de infração
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_relato_infracao_criar'
+      responses:
+        201:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_201_relato_infracao_criar'
+        400:
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+    get:
+      summary: Listar relatos de infração
+      tags:
+        - Relatos de infração
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_relato_infracao_listar'
+        '400':
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_400_bad_request'
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+  /V1/relatos_infracao/{idRelatoInfracao}:
+    parameters:
+      - name: token
+        in: header
+        description: Token JWT
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >- 
+          eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+      - name: idRelatoInfracao
+        in: path
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: string
+        style: simple
+        example: >-
+          1234      
+    get:
+      summary: Consultar Relato de Infração por id.
+      tags:
+        - Relatos de infração
+      responses:
+        '200':
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_relato_infracao_consultar'
+        '404':
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+  /V1/relatos_infracao/{idRelatoInfracao}/reconhecer:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - name: idRelatoInfracao
+          in: path
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >-
+            1234      
+    post:
+      summary: Receber Relato de Infração
+      tags:
+        - Relatos de infração
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_relato_infracao_receber'
+      responses:
+        200:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_relato_infracao_receber'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        404:
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/relatos_infracao/{idRelatoInfracao}/cancelar:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - name: idRelatoInfracao
+          in: path
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >-
+            1234      
+    post:
+      summary: Cancelar Relato de Infração
+      tags:
+        - Relatos de infração
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_relato_infracao_cancelar'
+      responses:
+        200:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_relato_infracao_cancelar'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        404:
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'
+  /V1/relatos_infracao/{idRelatoInfracao}/fechar:
+    parameters:
+        - name: token
+          in: header
+          description: Token JWT
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >- 
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImF5bGFuQGJvc2Nhcmluby5jb20iLCJwYXNzd29yZCI6InlhMGdzcWh5NHd6dnV2YjQifQ.yN_8-Mge9mFgsnYHnPEh_ZzNP7YKvSbQ3Alug9HMCsM
+        - name: idRelatoInfracao
+          in: path
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: string
+          style: simple
+          example: >-
+            1234      
+    post:
+      summary: Fechar Relato de Infração
+      tags:
+        - Relatos de infração
+      requestBody:
+        required: true
+        content: 
+          application/json:
+            schema: 
+              $ref: '#/components/schemas/request_body_relato_infracao_fechar'
+      responses:
+        200:
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_200_relato_infracao_fechar'
+        403:
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_403'
+        404:
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_404'
+        503:
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/body_response_503'      
+components:
+
+  schemas:
+  # schema response body diretorio 
+    body_response_200_diretorio:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            entrada:
+              type: object
+              properties:
+                chavePix:
+                  type: string
+                  minimum: 0
+                  maximum: 77
+                  example: 11122233300
+                tipoChave:
+                  type: string
+                  minimum: 0
+                  maximum: 77
+                  enum:
+                    - 1 = CPF
+                    - CNPJ
+                    - TELEFONE
+                    - EMAIL
+                    - EVP
+                conta:
+                  type: object
+                  properties:
+                    participanteISPB:
+                      type: integer
+                      minimum: 8
+                      maximum: 8
+                      example: 12345678
+                    agencia:
+                      type: string
+                      pattern: '^[0-9]{1,4}$'
+                      example: '0001'
+                    numeroContaTransacional:
+                      type: integer
+                      minimum: 1
+                      maximum: 20
+                      example: 7654321
+                    tipoConta:
+                      type: string
+                      minimum: 4
+                      maximum: 4
+                      enum:
+                        - CACC
+                        - SLRY
+                        - SVGS
+                    dataAbertura:
+                      type: string
+                      minimum: 1
+                      maximum: 22
+                      example: '2010-01-10T03:00:00Z'
+                proprietario:
+                  type: object
+                  required:
+                    - tipo
+                    - cpfCnpj
+                    - nome
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 6
+                      maximum: 6
+                      enum:
+                        - Fisica
+                        - Juridica
+                    cpfCnpj:
+                      type: integer
+                      minimum: 11
+                      maximum: 14
+                      example: 11122233300
+                    nome:
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                dataCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 24
+                  example: '2019-11-18T03:00:00Z'
+                dataChaveEntregue:
+                  type: string
+                  minimum: 1
+                  maximum: 24
+                  example: '2019-11-18T03:00:00Z'
+                dataCriacaoReinvidicacaoAberta:
+                  type: string
+                  minimum: 1
+                  maximum: 24
+                  example: '2019-11-18T03:00:00Z'
+                estatisticas:
+                  type: object
+                  properties:
+                    1: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Acordos
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Chave
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    2: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Acordos
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Dono
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    3: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Acordos
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Conta
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    4: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Fraudes_reportadas
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Chave
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    5: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Fraudes_reportadas
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Dono
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    6: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Fraudes_reportadas
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Conta
+                        3dias: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        30dias: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        6meses:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    7: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Fraudes_confirmadas
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Chave
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    8: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Fraudes_confirmadas
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Dono
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+                    9: 
+                      type: object
+                      properties:
+                        tipo:  
+                          type: string
+                          minimum: 1
+                          maximum: 20
+                          example: Fraudes_confirmadas
+                        por: 
+                          type: string
+                          minimum: 1
+                          maximum: 15
+                          example: Conta
+                        d3: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 0
+                        d30: 
+                          type: integer
+                          minimum: 0
+                          maximum: 10
+                          example: 5
+                        m6:
+                          type: integer
+                          minimum: 1
+                          maximum: 10
+                          example: 30
+    body_response_200_diretorio_delete:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 24
+              example: "2020-01-10T10:00:00Z"
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            chave:
+              type: string
+              minimum: 0
+              maximum: 77
+              example: 11122233300
+
+    body_response_201_diretorio:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            chavePix:
+              type: string
+              minimum: 0
+              maximum: 77
+              example: 11122233300
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - 1 = CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            conta:
+              type: object
+              properties:
+                participanteISPB:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                agencia:
+                  type: string
+                  pattern: '^[0-9]{1,4}$'
+                  example: '0001'
+                numeroContaTransacional:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  example: 7654321
+                tipoConta:
+                  type: string
+                  minimum: 4
+                  maximum: 4
+                  enum:
+                    - CACC
+                    - SLRY
+                    - SVGS
+                dataAbertura:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+            proprietario:
+              type: object
+              required:
+                - tipo
+                - cpfCnpj
+                - nome
+              properties:
+                tipo:
+                  type: string
+                  minimum: 6
+                  maximum: 6
+                  enum:
+                    - Fisica
+                    - Juridica
+                cpfCnpj:
+                  type: integer
+                  minimum: 11
+                  maximum: 14
+                  example: 11122233300
+                nome:
+                  minimum: 1
+                  maximum: 140
+                  example: João Silva
+            dataCriacao:
+              type: string
+              minimum: 1
+              maximum: 24
+              example: '2019-11-18T03:00:00Z'
+            dataChaveEntregue:
+              type: string
+              minimum: 1
+              maximum: 24
+              example: '2019-11-18T03:00:00Z'
+              
+    body_response_200_diretorio_put:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        tempo_resposta:
+          type: string
+          description: Data.
+          example: '2020-01-10T10:00:00Z'
+        correlation_id:
+          type: number
+          description: Tempo total de execução.
+          example: "a9f13566e19f5ca51329479a5bae60c5"
+        response:
+          type: object
+          properties:
+            chave:
+              type: string
+              minimum: 0
+              maximum: 77
+              example: 11122233300
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            conta:
+              type: object
+              properties:
+                participanteISPB:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                agencia:
+                  type: string
+                  pattern: '^[0-9]{1,4}$'
+                  example: '0001'
+                numeroContaTransacional:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  example: 7654321
+                tipoConta:
+                  type: string
+                  minimum: 4
+                  maximum: 4
+                  enum:
+                    - CACC
+                    - SLRY
+                    - SVGS
+                dataAbertura:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+            proprietario:
+              type: object
+              required:
+                - tipo
+                - cpfCnpj
+                - nome
+              properties:
+                tipo:
+                  type: string
+                  minimum: 6
+                  maximum: 6
+                  enum:
+                    - Fisica
+                    - Juridica
+                cpfCnpj:
+                  type: integer
+                  minimum: 11
+                  maximum: 14
+                  example: 11122233300
+                nome:
+                  minimum: 1
+                  maximum: 140
+                  example: João Silva
+            dataCriacao:
+              type: string
+              minimum: 1
+              maximum: 24
+              example: '2019-11-18T03:00:00Z'
+            dataChaveEntregue:
+              type: string
+              minimum: 1
+              maximum: 24
+              example: '2019-11-18T03:00:00Z'
+                  
+      # schema response body chave 
+    body_response_200_chave:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            chave1:
+              type: object
+              properties:
+                chave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: mail@mail.com
+                hasEntry:
+                  type: boolean
+                  minimum: 1
+                  maximum: 5
+                  example: true
+            chave2:
+              type: object
+              properties:
+                chave:
+                  type: string
+                  minimum: 1
+                  maximum: 5
+                  example: mail2@mail.com
+                hasEntry:
+                  type: boolean
+                  minimum: 1
+                  maximum: 5
+                  example: false
+            chave3:
+              type: object
+              properties:
+                chave:
+                  type: integer
+                  minimum: 0
+                  maximum: 30
+                  example: +5561999999999
+                hasEntry:
+                  type: boolean
+                  minimum: 1
+                  maximum: 5
+                  example: true
+            chave4:
+              type: object
+              properties:
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+                  example: +5561888888888
+                hasEntry:
+                  type: boolean
+                  example: false
+    # schema response body Reivindicação 
+    body_response_get_listclaim_200:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Ok
+          example: 200
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: a9f13566e19f5ca51329479a5bae60c5
+            maisElementos:
+              type: boolean
+              minimum: 1
+              maximum: 77
+              example: true
+              
+            reivindicacoes:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Propriedade
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 5561988887777
+                tipoChave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Telefone
+                  
+                contaReclamente:
+                  type: object
+                  properties:
+                    usuario:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 12345678
+                    agencia:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 1001
+                    conta:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 0007654321
+                    tipoConta:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: CACC
+                    date:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: "2010-01-10T03:00:00Z"
+                      
+                cliente:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: Pessoa Física
+                    cpf:
+                      type: integer
+                      minimum: 1
+                      maximum: 14
+                      example: 11122233300
+                    name:
+                      type: string
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                      
+                funcionario:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: 87654321
+                id:
+                  type: string
+                  minimum: 1
+                  maximum: 10
+                  example: "123e4567-e89b-12d3-a456-426655440000"
+                status:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: Cancelado
+                resolucaoFinal:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                conclusao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                motivo:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: Operação Padrão
+                motivoCancelamento:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: Fraude
+                canceladoPor:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: Funcionário
+                
+    body_response_get_claimid_200:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Ok
+          example: 200
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: a9f13566e19f5ca51329479a5bae60c5
+              
+            reivindicacoes:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Propriedade
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 5561988887777
+                tipoChave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Telefone
+                  
+                contaReclamente:
+                  type: object
+                  properties:
+                    usuario:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 12345678
+                    agencia:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 1001
+                    conta:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 0007654321
+                    tipoConta:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: CACC
+                    date:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: "2010-01-10T03:00:00Z"
+                      
+                cliente:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: Pessoa Física
+                    cpf:
+                      type: integer
+                      minimum: 1
+                      maximum: 14
+                      example: 11122233300
+                    name:
+                      type: string
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                      
+                funcionario:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: 87654321
+                id:
+                  type: string
+                  minimum: 1
+                  maximum: 10
+                  example: "123e4567-e89b-12d3-a456-426655440000"
+                status:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: Aberto
+                resolucaoFinal:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                conclusao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                  
+    body_response_post_receber_200:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Ok
+          example: 200
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: a9f13566e19f5ca51329479a5bae60c5
+              
+            reivindicacoes:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Propriedade
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 5561988887777
+                tipoChave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Telefone
+                  
+                contaReclamente:
+                  type: object
+                  properties:
+                    usuario:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 12345678
+                    agencia:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 1001
+                    conta:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 0007654321
+                    tipoConta:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: CACC
+                    date:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: "2010-01-10T03:00:00Z"
+                      
+                cliente:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: Pessoa Física
+                    cpf:
+                      type: integer
+                      minimum: 1
+                      maximum: 14
+                      example: 11122233300
+                    name:
+                      type: string
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                      
+                funcionario:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: 87654321
+                id:
+                  type: string
+                  minimum: 1
+                  maximum: 10
+                  example: "123e4567-e89b-12d3-a456-426655440000"
+                status:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: AGUARDANDO RESOLUÇÃO
+                resolucaoFinal:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                conclusao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                  
+    body_response_post_confirmar_200:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Ok
+          example: 200
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: a9f13566e19f5ca51329479a5bae60c5
+              
+            reivindicacoes:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Propriedade
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 5561988887777
+                tipoChave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Telefone
+                  
+                contaReclamente:
+                  type: object
+                  properties:
+                    usuario:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 12345678
+                    agencia:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 1001
+                    conta:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 0007654321
+                    tipoConta:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: CACC
+                    date:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: "2010-01-10T03:00:00Z"
+                      
+                cliente:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: Pessoa Física
+                    cpf:
+                      type: integer
+                      minimum: 1
+                      maximum: 14
+                      example: 11122233300
+                    name:
+                      type: string
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                      
+                funcionario:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: 87654321
+                id:
+                  type: string
+                  minimum: 1
+                  maximum: 10
+                  example: "123e4567-e89b-12d3-a456-426655440000"
+                status:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: Confirmado
+                resolucaoFinal:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                conclusao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                confirmaMotivo:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: PEDIDO DE USUÁRIO
+                  
+    body_response_post_cancelar_200:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Ok
+          example: 200
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: a9f13566e19f5ca51329479a5bae60c5
+              
+            reivindicacoes:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Propriedade
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 5561988887777
+                tipoChave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Telefone
+                  
+                contaReclamente:
+                  type: object
+                  properties:
+                    usuario:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 12345678
+                    agencia:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 1001
+                    conta:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 0007654321
+                    tipoConta:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: CACC
+                    date:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: "2010-01-10T03:00:00Z"
+                      
+                cliente:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: Pessoa Física
+                    cpf:
+                      type: integer
+                      minimum: 1
+                      maximum: 14
+                      example: 11122233300
+                    name:
+                      type: string
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                      
+                funcionario:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: 87654321
+                id:
+                  type: string
+                  minimum: 1
+                  maximum: 10
+                  example: "123e4567-e89b-12d3-a456-426655440000"
+                status:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: Cancelado
+                resolucaoFinal:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                conclusao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                motivoCancelamento:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: FRAUDE
+                canceladoPor:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: Responsável
+                  
+    body_response_post_concluir_200:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Ok
+          example: 200
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: a9f13566e19f5ca51329479a5bae60c5
+              
+            reivindicacoes:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Propriedade
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 5561988887777
+                tipoChave:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Telefone
+                  
+                contaReclamente:
+                  type: object
+                  properties:
+                    usuario:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 12345678
+                    agencia:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 1001
+                    conta:
+                      type: integer
+                      minimum: 1
+                      maximum: 77
+                      example: 0007654321
+                    tipoConta:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: CACC
+                    date:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: "2010-01-10T03:00:00Z"
+                      
+                cliente:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 1
+                      maximum: 77
+                      example: Pessoa Física
+                    cpf:
+                      type: integer
+                      minimum: 1
+                      maximum: 14
+                      example: 11122233300
+                    name:
+                      type: string
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                      
+                funcionario:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: 87654321
+                id:
+                  type: string
+                  minimum: 1
+                  maximum: 10
+                  example: "123e4567-e89b-12d3-a456-426655440000"
+                status:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  example: Completo
+                resolucaoFinal:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                conclusao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: "2020-01-17T10:00:00Z"
+                confirmarMotivo:
+                  type: string
+                  minimum: 1
+                  maximum: 20
+                  example: Operação padrão
+                  
+            dataEntrada:
+              type: string
+              minimum: 1
+              maximum: 20
+              example: "2020-01-10T10:00:00Z"
+            dataPrioridadeChave:
+              type: string
+              minimum: 1
+              maximum: 20
+              example: "2019-11-18T03:00:00Z"
+              
+    body_response_200_reconciliacao_ca_id:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            id: 
+              type: integer
+              example: 1234
+            status:
+              type: string
+              enum:
+                - REQUESTED
+                - PROCESSING
+                - AVAILABLE
+                - UNAVAILABLE
+                - ERROR
+              example: AVAILABLE
+            participanteISPB:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 12345678
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            tempoSolicitacao:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+            tempoCriacao:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2020-01-10T10:00:10Z'
+            url:
+              type: string
+              description: URL para download do arquivo. Presente quando status for `AVAILABLE`.
+              maxLength: 500
+              example: https://some_download_url/apath/12345678/dict_file_name.cids
+            bytes:
+              type: integer
+              description: Tamanho do arquivo. Presente quando status for `AVAILABLE`.
+              example: 3200000
+            sha256:
+              type: string
+              description: SHA256 do conteúdo do arquivo. Presente quando status for `AVAILABLE`.
+              pattern: '^[0-9a-fA-F]{64}$'
+              example: 'f0e4c2f76c58916ec258f246851bea091d14d4247a2fc3e18694461b1816e13b'
+  
+    body_response_201:
+      type: object
+      properties:
+        httpStatusCode:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        httpStatusMessage:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        totalExecutionTime:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          properties:
+            tempoResposta:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-10T10:00:00Z"
+            idCorrelacao:
+              type: string
+              minimum: 1
+              maximum: 5
+              example: a9f13566e19f5ca51329479a5bae60c5
+            
+            confirmacao:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: Proprietário
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: +5561988887777
+                tipoChave:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: Numero Celular
+                  
+            contaRequisitante:
+              type: object
+              properties:
+                requisitante:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 12345678
+                agencia:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 1001
+                numeroConta:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 0007654321
+                tipoConta:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: CACC
+                data:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: "2010-01-10T03:00:00Z"
+                  
+            requisitante:
+              type: object
+              properties:
+                tipo:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: Pessoa Física
+                cpf:
+                  type: integer
+                  minimum: 1
+                  maximum: 77
+                  example: 11122233300
+                nome:
+                  type: string
+                  minimum: 1
+                  maximum: 77
+                  example: João Silva
+                  
+            participante:
+              type: integer
+              minimum: 1
+              maximum: 77
+              example: 87654321
+            id:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: 123e4567-e89b-12d3-a456-426655440000
+            fimDoPeriodoDeConclusao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-17T10:00:00Z"
+            fimDoPeriodoDeResolucao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-17T10:00:00Z"
+            ultimaModificacao:
+              type: string
+              minimum: 1
+              maximum: 77
+              example: "2020-01-17T10:00:00Z"
+                
+    # schema response body reconciliação
+    body_response_201_reconciliacao_sync:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            participanteISPB:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 12345678
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            verificadorSyncParticipante:
+              type: string
+              pattern: ^[0-9a-fA-F]{64}$
+              example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+            id: 
+              type: integer
+              example: 1234
+            result:
+              type: string
+              enum:
+                - OK
+                - NOK
+    body_response_201_reconciliacao_cid:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            id: 
+              type: integer
+              example: 1234
+            status:
+              type: string
+              enum:
+                - REQUESTED
+                - PROCESSING
+                - AVAILABLE
+                - UNAVAILABLE
+                - ERROR
+              example: REQUESTED
+            participanteISPB:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 12345678
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            verificadorSyncParticipante:
+              type: string
+              pattern: ^[0-9a-fA-F]{64}$
+              example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    body_response_201_reconciliacao_cid_id:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            id: 
+              type: integer
+              example: 1234
+            status:
+              type: string
+              enum:
+                - REQUESTED
+                - PROCESSING
+                - AVAILABLE
+                - UNAVAILABLE
+                - ERROR
+              example: REQUESTED
+            participanteISPB:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 12345678
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            tempoSolicitacao:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+            tempoCriacao:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+            url:
+              type: string
+              description: URL para download do arquivo. Presente quando status for `AVAILABLE`.
+              maxLength: 500
+              example: https://alguma_url.algum_dominio/algum_path/nome_do_arquivo_gerado_pelo_dict.tipo
+            bytes:
+              type: integer
+              description: Tamanho do arquivo. Presente quando status for `AVAILABLE`.
+            sha256:
+              type: string
+              description: SHA256 do conteúdo do arquivo. Presente quando status for `AVAILABLE`.
+              pattern: '^[0-9a-fA-F]{64}$'
+              example: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    body_response_201_reconciliacao_listar_eventos_cid:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            participanteISPB:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 12345678
+            tipoChave:
+              type: string
+              minimum: 0
+              maximum: 5
+              enum:
+                - CPF
+                - CNPJ
+                - TELEFONE
+                - EMAIL
+                - EVP
+            tempoInicio:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+            tempoFim:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+            InicioVerificacaoSync:
+              type: string
+              pattern: ^[0-9a-fA-F]{64}$
+              example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+            FimVerificacaoSync:
+              type: string
+              pattern: ^[0-9a-fA-F]{64}$
+              example: a592f5fb5bef95a3ec8431ebaf609e1af1e4c1b46edb0475394c5595988c748c
+            eventosCid:
+              type: object
+              properties:
+                1:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      enum:
+                        - ADDED
+                        - REMOVED
+                      example: ADDED
+                    cid:
+                      type: string
+                      pattern: ^[0-9a-fA-F]{64}$
+                      example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                    horario:
+                      type: string
+                      minimum: 1
+                      maximum: 22
+                      example: '2010-01-10T03:00:00Z'
+                2:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      enum:
+                        - ADDED
+                        - REMOVED
+                      example: REMOVED
+                    cid:
+                      type: string
+                      pattern: ^[0-9a-fA-F]{64}$
+                      example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+                    horario:
+                      type: string
+                      minimum: 1
+                      maximum: 22
+                      example: '2010-01-10T03:00:00Z'
+    body_response_201_reconciliacao_viculos_cid:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            cid:
+              type: string
+              pattern: ^[0-9a-fA-F]{64}$
+              example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+            entrada: 
+              type: object
+              properties:
+                chave:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+                  example: +5561888888888
+                tipoChave:
+                  type: string
+                  minimum: 0
+                  maximum: 5
+                  enum:
+                    - CPF
+                    - CNPJ
+                    - TELEFONE
+                    - EMAIL
+                    - EVP
+                conta:
+                  type: object
+                  properties:
+                    participanteISPB:
+                      type: integer
+                      minimum: 8
+                      maximum: 8
+                      example: 12345678
+                    agencia:
+                      type: string
+                      pattern: '^[0-9]{1,4}$'
+                      example: '0001'
+                    numeroContaTransacional:
+                      type: integer
+                      minimum: 1
+                      maximum: 20
+                      example: 7654321
+                    tipoConta:
+                      type: string
+                      minimum: 4
+                      maximum: 4
+                      enum:
+                        - CACC
+                        - SLRY
+                        - SVGS
+                    dataAbertura:
+                      type: string
+                      minimum: 1
+                      maximum: 22
+                      example: '2010-01-10T03:00:00Z'
+                proprietario:
+                  type: object
+                  properties:
+                    tipo:
+                      type: string
+                      minimum: 6
+                      maximum: 6
+                      enum:
+                        - Fisica
+                        - Juridica
+                    cpfCnpj:
+                      type: integer
+                      minimum: 11
+                      maximum: 14
+                      example: 11122233300
+                    nome:
+                      minimum: 1
+                      maximum: 140
+                      example: João Silva
+                dataCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 24
+                  example: '2019-11-18T03:00:00Z'
+                chaveProprietario:
+                  type: string
+                  minimum: 1
+                  maximum: 24
+                  example: '2019-11-18T03:00:00Z'
+      # response body relatos de infração 
+    body_response_201_relato_infracao_criar:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 201
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            relatos_infracao:
+              type: object
+              properties:
+                idTransacao:
+                  type: string
+                  description: Transação com suspeita de infração
+                  example: 'E9999901012341234123412345678900'
+                  pattern: '\w{32}'
+                tipoInfracao:
+                  type: string
+                  description: Tipo da infração
+                  enum:
+                    - FRAUD
+                    - REFUND_REQUEST
+                    - REFUND_CANCELLED
+                autorReporte:
+                  type: string
+                  description: Participante que deu origem ao relato de infração
+                  enum:
+                    - DEBITED_PARTICIPANT
+                    - CREDITED_PARTICIPANT
+                detalhesRelato:
+                  description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+                  maxLength: 2000
+                  example: Transação feita através de QR Code falso em boleto
+                id: 
+                  type: integer
+                  example: 1234
+                status:
+                  type: string
+                  enum:
+                    - REQUESTED
+                    - PROCESSING
+                    - AVAILABLE
+                    - UNAVAILABLE
+                    - ERROR
+                participanteDebitado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                participanteCreditado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                tempoCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                UltimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+    body_response_200_relato_infracao_listar:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            possuiMaisElementos:
+              type: boolean
+              description: Existem mais elementos para iterar
+              example: true
+            relatos_infracao:
+              type: object
+              properties:
+                idTransacao:
+                  type: string
+                  description: Transação com suspeita de infração
+                  example: 'E9999901012341234123412345678900'
+                  pattern: '\w{32}'
+                tipoInfracao:
+                  type: string
+                  description: Tipo da infração
+                  enum:
+                    - FRAUD
+                    - REFUND_REQUEST
+                    - REFUND_CANCELLED
+                autorReporte:
+                  type: string
+                  description: Participante que deu origem ao relato de infração
+                  enum:
+                    - DEBITED_PARTICIPANT
+                    - CREDITED_PARTICIPANT
+                detalhesRelato:
+                  description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+                  maxLength: 2000
+                  example: Transação feita através de QR Code falso em boleto
+                id: 
+                  type: integer
+                  example: 1234
+                status:
+                  type: string
+                  enum:
+                    - REQUESTED
+                    - PROCESSING
+                    - AVAILABLE
+                    - UNAVAILABLE
+                    - ERROR
+                participanteDebitado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                participanteCreditado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                tempoCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                UltimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                analiseResultados:
+                  type: string
+                  description: Resultado da análise da infração.
+                  enum:
+                    - AGREED
+                    - DISAGREED
+                  example: AGREED
+                analiseDetalhada:
+                  description: Detalhes da análise da infração, que possam orientar o pagador dos próximos passos.
+                  maxLength: 2000
+                  example: Valor bloqueado. Para mais informações, contactar central antifraude em 11 3000-00000, informando ID 9999.
+    body_response_200_relato_infracao_consultar:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            relatos_infracao:
+              type: object
+              properties:
+                idTransacao:
+                  type: string
+                  description: Transação com suspeita de infração
+                  example: 'E9999901012341234123412345678900'
+                  pattern: '\w{32}'
+                tipoInfracao:
+                  type: string
+                  description: Tipo da infração
+                  enum:
+                    - FRAUD
+                    - REFUND_REQUEST
+                    - REFUND_CANCELLED
+                autorReporte:
+                  type: string
+                  description: Participante que deu origem ao relato de infração
+                  enum:
+                    - DEBITED_PARTICIPANT
+                    - CREDITED_PARTICIPANT
+                detalhesRelato:
+                  description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+                  maxLength: 2000
+                  example: Transação feita através de QR Code falso em boleto
+                id: 
+                  type: integer
+                  example: 1234
+                status:
+                  type: string
+                  enum:
+                    - REQUESTED
+                    - PROCESSING
+                    - AVAILABLE
+                    - UNAVAILABLE
+                    - ERROR
+                participanteDebitado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                participanteCreditado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                tempoCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                UltimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+    body_response_200_relato_infracao_receber:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            relatos_infracao:
+              type: object
+              properties:
+                idTransacao:
+                  type: string
+                  description: Transação com suspeita de infração
+                  example: 'E9999901012341234123412345678900'
+                  pattern: '\w{32}'
+                tipoInfracao:
+                  type: string
+                  description: Tipo da infração
+                  enum:
+                    - FRAUD
+                    - REFUND_REQUEST
+                    - REFUND_CANCELLED
+                autorReporte:
+                  type: string
+                  description: Participante que deu origem ao relato de infração
+                  enum:
+                    - DEBITED_PARTICIPANT
+                    - CREDITED_PARTICIPANT
+                detalhesRelatos:
+                  description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+                  maxLength: 2000
+                  example: Transação feita através de QR Code falso em boleto
+                id: 
+                  type: integer
+                  example: 1234
+                status:
+                  type: string
+                  enum:
+                    - REQUESTED
+                    - PROCESSING
+                    - AVAILABLE
+                    - UNAVAILABLE
+                    - ERROR
+                participanteDebitado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                participanteCreditado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                tempoCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                UltimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+    body_response_200_relato_infracao_cancelar:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            relatos_infracao:
+              type: object
+              properties:
+                idTransacao:
+                  type: string
+                  description: Transação com suspeita de infração
+                  example: 'E9999901012341234123412345678900'
+                  pattern: '\w{32}'
+                tipoInfracao:
+                  type: string
+                  description: Tipo da infração
+                  enum:
+                    - FRAUD
+                    - REFUND_REQUEST
+                    - REFUND_CANCELLED
+                  example: FRAUD
+                autorReporte:
+                  type: string
+                  description: Participante que deu origem ao relato de infração
+                  enum:
+                    - DEBITED_PARTICIPANT
+                    - CREDITED_PARTICIPANT
+                detalhesRelatos:
+                  description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+                  maxLength: 2000
+                  example: Transação feita através de QR Code falso em boleto
+                id: 
+                  type: integer
+                  example: 1234
+                status:
+                  type: string
+                  enum:
+                    - REQUESTED
+                    - PROCESSING
+                    - AVAILABLE
+                    - UNAVAILABLE
+                    - ERROR
+                participanteDebitado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                participanteCreditado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                tempoCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+    body_response_200_relato_infracao_fechar:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 200
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Accepted
+        date:
+          type: string
+          description: Data.
+          example: "2021-07-14 12:41:10"
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        response:
+          type: object
+          properties:
+            correlationId:
+              type: string
+              minimum: 1
+              maximum: 32
+              example: "a9f13566e19f5ca51329479a5bae60c5"
+            relatos_infracao:
+              type: object
+              properties:
+                idTransacao:
+                  type: string
+                  description: Transação com suspeita de infração
+                  example: 'E9999901012341234123412345678900'
+                  pattern: '\w{32}'
+                tipoInfracao:
+                  type: string
+                  description: Tipo da infração
+                  enum:
+                    - FRAUD
+                    - REFUND_REQUEST
+                    - REFUND_CANCELLED
+                  example: FRAUD
+                autorReporte:
+                  type: string
+                  description: Participante que deu origem ao relato de infração
+                  enum:
+                    - DEBITED_PARTICIPANT
+                    - CREDITED_PARTICIPANT
+                detalhesRelatos:
+                  description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+                  maxLength: 2000
+                  example: Transação feita através de QR Code falso em boleto
+                id: 
+                  type: integer
+                  example: "91d65e98-97c0-4b0f-b577-73625da1f9fc"
+                status:
+                  type: string
+                  enum:
+                    - CLOSED
+                    - REQUESTED
+                    - PROCESSING
+                    - AVAILABLE
+                    - UNAVAILABLE
+                    - ERROR
+                participanteDebitado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                participanteCreditado:
+                  type: integer
+                  minimum: 8
+                  maximum: 8
+                  example: 12345678
+                tempoCriacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                ultimaModificacao:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: '2010-01-10T03:00:00Z'
+                resultado_analise:
+                  type: string
+                  minimum: 1
+                  maximum: 22
+                  example: AGREED
+                detalhe_de_analise:
+                  type: object
+                  properties:
+                    detalhe_de_analise:
+                      type: string
+                      minimum: 1
+                      maximum: 22
+                      example: Valor bloqueado. Para mais informações, contactar central antifraude em 11 3000-00000, informando ID 9999.
+
+      #schema response body erros gerais      
+    body_response_400_entry_invalid:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 400
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Entry is invalid.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: A entrada contém campos inválidos
+    body_response_400_bad_request:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 400
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Bad request.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: A entrada contém campos inválidos
+    body_response_403:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 403
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Forbidden
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: O Participante não está permitido a acessar esse recurso. 
+    body_response_429:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 403
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Too Many Requests
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+    body_response_404:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 404
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Not found.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: A entrada associada à chave fornecida não existe
+    body_response_503:
+      type: object
+      properties:
+        http_status_code:
+          type: string
+          description: Código HTTP do erro.
+          example: 503
+        http_status_message:
+          type: string
+          description: Status de mensagem.
+          example: Service Unavailable.
+        date:
+          type: string
+          description: Data.
+          example: '2021-07-14 12:41:10'
+        total_execution_time:
+          type: number
+          description: Tempo total de execução.
+          example: 6.5479278564453125
+        error:
+          properties:
+            message: 
+              example: O serviço está em manutenção programada
+    request_body_diretorio_post:
+      type: object
+      required:
+        - tipoChave
+        - conta
+        - proprietario
+        - motivo
+        - requestId
+      properties:
+        chave:
+          type: string
+          minimum: 0
+          maximum: 77
+          example: 11122233300
+          description: Chave Pix
+        tipoChave:
+          type: integer
+          minimum: 1
+          maximum: 1
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+          description: 1 = CPF | 2 = CNPJ | 3 = TELEFONE | 4 = EMAIL | 5 = EVP
+            
+        conta:
+          type: object
+          required:
+            - participanteISPB
+            - numeroContaTransacional
+            - tipoConta
+            - dataAbertura
+          properties:
+            participanteISPB:
+              type: string
+              minimum: 8
+              maximum: 8
+              example: 12345678
+              description: Identificador SPB do provedor da conta
+            agencia:
+              type: string
+              pattern: '^[0-9]{1,4}$'
+              example: '0001'
+              description: Agência, sem dígito verificador 
+            numeroContaTransacional:
+              type: string
+              minimum: 1
+              maximum: 20
+              example: 7654321
+              description: Número de conta, incluindo verificador. Se verificador for letra, subtituir por 0 
+            tipoConta:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+              description: 1 = Conta Corrente | 2 = Conta Salário | 3 = Conta poupança
+            dataAbertura:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+              description: Data de abertura da conta. Para o horário, caso não seja conhecido, convenciona-se o início do dia em BRT
+        proprietario:
+          type: object
+          properties:
+            tipo:
+              type: integer
+              enum:
+                - 1
+                - 2
+              description: 1 = Fisica | 2 = Juridica
+            cpfCnpj:
+              type: integer
+              minimum: 11
+              maximum: 14
+              example: 11122233300
+              description: Chave Pix CPF ou CNPJ
+              
+            nome:
+              minimum: 1
+              maximum: 140
+              example: João Silva
+              description: nome completo
+        motivo:
+          type: integer
+          minimum: 1
+          maximum: 20
+          example: USER_REQUESTED
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+          description: 1 = USER_REQUESTED | 2 = ACCOUNT_CLOSURE| 3 = BRANCH_TRANSFER | 4 = ENTRY_INACTIVITY | 5 = RECONCILIATION | 6 = FRAUD
+        requestId:
+          type: string
+          minimum: 36
+          maximum: 36
+          example: a946d533-7f22-42a5-9a9b-e87cd55c0f4d
+          description: Chave da idempotência da requisição. 
+    request_body_diretorio_put:
+      type: object
+      required:
+        - chave
+        - tipoChave
+        - conta
+        - proprietario
+        - motivo
+        - requestId
+      properties:
+        chave:
+          type: string
+          minimum: 0
+          maximum: 77
+          example: 11122233300
+          description:  Chave Pix
+        tipoChave:
+          type: integer
+          minimum: 1
+          maximum: 1
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+          description: 1 = CPF | 2 = CNPJ | 3 = TELEFONE | 4 = EMAIL | 5 = EVP
+        conta:
+          type: object
+          required:
+            - participanteISPB
+            - numeroContaTransacional
+            - tipoConta
+            - dataAbertura
+          properties:
+            participanteISPB:
+              type: integer
+              minimum: 8
+              maximum: 8
+              example: 12345678
+              description: Identificador SPB do provedor da conta
+            agencia:
+              type: string
+              pattern: '^[0-9]{1,4}$'
+              example: '0001'
+              description: Agência, sem dígito verificador
+            numeroContaTransacional:
+              type: string
+              pattern: '^[0-9]{1,20}$'
+              example: '0007654321'
+              description: Número de conta, incluindo verificador. Se verificador for letra, substituir por 0
+            tipoConta:
+              type: integer
+              minimum: 1
+              maximum: 1
+              enum:
+                - 1
+                - 2
+                - 3
+              description: 1 = Conta Corrente  | 2 = Conta Salário | 3 = Conta Poupança
+            dataAbertura:
+              type: string
+              minimum: 1
+              maximum: 22
+              example: '2010-01-10T03:00:00Z'
+              description: Data de abertura da conta. Para o horário, caso não seja conhecido, convenciona-se o início do dia em BRT
+        proprietario:
+          type: object
+          properties:
+            tipo:
+              type: integer
+              enum:
+                - 1
+                - 2
+              description: 1 =  Fisica | 2 = Juridica
+            cpfCnpj:
+              type: integer
+              minimum: 11
+              maximum: 14
+              example: 11122233300
+              description: Chave Pix CPF ou CNPJ 
+            nome:
+              type: string
+              minimum: 1
+              maximum: 140
+              example: João Silva
+              description: Nome Completo
+    request_body_diretorio_delete:
+      type: object
+      required:
+        - chave
+        - participanteISPB
+        - motivo
+      properties:
+        chave:
+          type: string
+          minimum: 0
+          maximum: 77
+          example: 11122233300
+          description: Chave Pix
+        participanteISPB:
+          type: integer
+          minimum: 8
+          maximum: 8
+          example: 12345678
+          description: Identificador SPB do provedor da conta
+        motivo:
+          type: integer
+          minimum: 1
+          maximum: 1
+          example: USER_REQUESTED
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+          description: 1 = USER_REQUESTED | 2 = ACCOUNT_CLOSURE | 3 = BRANCH_TRANSFER | 4 =  ENTRY_INACTIVITY| 5 = RECONCILIATION | 6 = FRAUD
+#Chave
+    request_body_chave:
+      properties:
+        chave1:
+          type: string
+          example: mail@mail.com
+          minimum: 1
+          maximum: 77
+          description: Chave Pix
+        chave2:
+          type: string
+          minimum: 1
+          maximum: 77
+          example: mail2@mail.com
+          description: Chave Pix
+        chave3:
+          type: string
+          minimum: 1
+          maximum: 77
+          example: +5561999999999
+          description: Chave Pix
+        chave4:
+          type: string
+          minimum: 1
+          maximum: 77
+          example: +5561888888888
+          description: Chave Pix
+  # Request body Reivindicação 
+    request_body_reivindicacao_confirmar:
+      type: object
+      required:
+      - claimId
+      - participant
+      - reason
+      properties:
+        claimId:
+          type: string
+          example: '123e4567-e89b-12d3-a456-426655440000'
+          minimum: 1
+          maximum: 77
+          description: Chave da reivindicação
+        participant:
+          type: integer
+          example: 12345678
+          minimum: 1
+          maximum: 77
+          description: Identificador SPB do controlador 
+        reason:
+          type: string
+          example: Pedido usuário
+          minimum: 1
+          maximum: 77
+          description: Motivo da operação
+          
+    request_body_reivindicacao_reconhecer:
+      type: object
+      required:
+      - claimId
+      - participant
+      properties:
+        claimId:
+          type: string
+          example: '123e4567-e89b-12d3-a456-426655440000'
+          minimum: 1
+          maximum: 77
+          description: Chave da reivindicação
+        participant:
+          type: integer
+          example: 12345678
+          minimum: 1
+          maximum: 77
+          description: Identificador SPB do doador
+          
+    request_body_reivindicacao_completo:
+      type: object
+      required:
+      - claimId
+      - participant
+      - identificacaoPedido
+      properties:
+        claimId:
+          type: string
+          example: '123e4567-e89b-12d3-a456-426655440000'
+          minimum: 1
+          maximum: 77
+          description: Chave da reivindicação
+        participant:
+          type: integer
+          example: 12345678
+          minimum: 1
+          maximum: 77
+          description: Identificador SPB do doador
+        identificacaoPedido:
+          type: string
+          example: 'a946d533-7f22-42a5-9a9b-e87cd55c0f4d'
+          minimum: 1
+          maximum: 77
+          description: Identificação do pedido
+    request_body_criar_reivindicacao:
+      type: object
+      required:
+      - tipo
+      - chave
+      - tipoChave
+      properties:
+        tipo:
+          type: string
+          example: PROPRIETARIO
+          minimum: 1
+          maximum: 77
+          description: Tipo de reivindicação
+        chave:
+          type: string
+          example: +5561988887777
+          minimum: 1
+          maximum: 77
+          description: Chave Pix
+        tipoChave:
+          type: string
+          example: Numero de Telefone
+          minimum: 1
+          maximum: 77
+          description: Tipo de chave. Novos tipos podem surgir.
+        contaRequisitante:
+          type: object
+          required:
+          - participante
+          - numeroConta
+          - tipoConta
+          - data
+          properties:
+            participante:
+              type: string
+              example: 12345678
+              minimum: 1
+              maximum: 77
+              description: Identificador SPB do provedor da conta
+            agencia:
+              type: string
+              example: 1001
+              minimum: 1
+              maximum: 77
+              description: Agência, sem dígito verificador.
+            numeroConta:
+              type: string
+              example: 0007654321
+              minimum: 1
+              maximum: 77
+              description: Número de conta, incluindo verificador. Se verificador for letra, substituir por 0.
+            tipoConta:
+              type: string
+              example: CACC
+              minimum: 1
+              maximum: 77
+              description: Tipo de conta
+            data:
+              type: string
+              example: "2010-01-10T03:00:00Z"
+              minimum: 1
+              maximum: 77
+              description: Data de abertura da conta. Para o horário, caso não seja conhecido, convenciona-se o início do dia em BRT
+            requisitante:
+              type: object
+              properties:
+                tipo:
+                  type: string
+                  example: Pessoa Fisica
+                  minimum: 1
+                  maximum: 77
+                  description: Tipo de pessoa Fisica ou Juríica
+                cpf:
+                  type: integer
+                  example: 11122233300235
+                  minimum: 1
+                  maximum: 14
+                  description: No caso de pessoa Fisica será requerido CPF e se for pessoa Jurídica será solicitado o CNPJ
+                nome:
+                  type: string
+                  example: João Silva
+                  minimum: 1
+                  maximum: 77
+                  description: Nome completo
+# Reconciliação
+    request_body_reconciliacao_sync:
+      type: object
+      required:
+      - participanteISPB
+      - tipoChave
+      - VerificadorSyncParticipante
+      properties:
+        participanteISPB:
+          type: string
+          minimum: 8
+          maximum: 8
+          example: 12345678
+        tipoChave:
+          type: integer
+          minimum: 1
+          maximum: 1
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+          description: 1 = CPF | 2 = CNPJ | 3 = TELEFONE | 4 = EMAIL | 5 = EVP
+        VerificadorSyncParticipante:
+          type: string
+          pattern: ^[0-9a-fA-F]{64}$
+          example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+          description: Verificador de sincronismo calculado pelo participante
+    request_body_reconciliacao_cid:
+      type: object 
+      required:
+      - participanteISPB
+      - tipoChave
+      properties:
+        participanteISPB:
+          type: integer
+          minimum: 8
+          maximum: 8
+          example: 12345678
+          description: Participante do ISPB
+        tipoChave:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+          description: 1 = CPF | 2 = CNPJ | 3 = TELEFONE | 4 = EMAIL | 5 = EVP
+    # Request body relato de infrações
+    request_body_relato_infracao_criar:
+      type: object 
+      required:
+      - idTransacao
+      - tipoInfracao
+      properties:
+        idTransacao:
+          type: string
+          description: Transação com suspeita de infração
+          example: 'E9999901012341234123412345678900'
+          pattern: '\w{32}'
+        tipoInfracao:
+          type: integer
+          enum:
+            - 1
+          description: 1 = FRAUD 
+        detalhesRelato:
+          description: Detalhes que possam ajudar o participante recebedor a analisar a suspeita de infração
+          maxLength: 2000
+          example: "Transação feita através de QR Code falso em boleto"
+    request_body_relato_infracao_receber:
+      type: object 
+      required:
+      - idRelatoInfracao
+      - participant
+      properties:
+        idRelatoInfracao:
+          type: string
+          format: uuid
+          description: ID do relato de infração
+          example: "91d65e98-97c0-4b0f-b577-73625da1f9fc"
+        participant:
+          type: string
+          minimum: 8
+          maximum: 8
+          example: 12345678
+          description: Identificador SPB do participante 
+          
+    request_body_relato_infracao_cancelar:
+      type: object 
+      required:
+      - idRelatoInfracao
+      - participant
+      properties:
+        idRelatoInfracao:
+          type: string
+          format: uuid
+          description: ID do relato de infração
+          example: "91d65e98-97c0-4b0f-b577-73625da1f9fc"
+        participant:
+          type: string
+          minimum: 8
+          maximum: 8
+          description: Identificador SPB do participante que reportou a infração
+          
+    request_body_relato_infracao_fechar:
+      type: object 
+      required:
+      - idRelatoInfracao
+      - participant
+      - AnalysisResult
+      properties:
+        idRelatoInfracao:
+          type: string
+          format: uuid
+          description: ID do relato de infração
+          example: "91d65e98-97c0-4b0f-b577-73625da1f9fc"
+        participant:
+          type: string
+          minimum: 8
+          maximum: 8
+          description: Identificador SPB do participante recebedor
+        analiseResultados:
+          type: integer
+          example: AGREED
+          enum:
+            - 1
+            - 2
+          description: 1 = AGREED | 2 = DISAGREED
+        analiseDetalhada:
+          type: string
+          description: Detalhes da análise da infração, que possam orientar o pagador dos próximos passos.
+          maxLength: 2000
+          example: Valor bloqueado. Para mais informações, contactar central antifraude em 11 3000-00000, informando ID 9999.
+          
+          
+          
+          
